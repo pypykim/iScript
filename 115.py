@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding:utf-8 -*-
 #!/usr/bin/env python2
 # vim: set fileencoding=utf8
 
@@ -13,7 +15,9 @@ import argparse
 import random
 import sha
 import select
-
+import f115api
+import threading
+reload(sys).setdefaultencoding("utf-8")
 ############################################################
 # wget exit status
 wget_es = {
@@ -44,6 +48,17 @@ s = '\x1b[%d;%dm%s\x1b[0m'       # terminual color template
 
 cookie_file = os.path.join(os.path.expanduser('~'), '.115.cookies')
 
+# headers = {
+#     "Accept":"Accept: application/json, text/javascript, */*; q=0.01",
+#     "Accept-Encoding":"text/html",
+#     "Accept-Language":"en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2",
+#     "Content-Type":"application/x-www-form-urlencoded; charset=UTF-8",
+#     "Referer":"http://m.115.com/",
+#     "X-Requested-With": "XMLHttpRequest",
+#     "User-Agent":"Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 "\
+#         "(KHTML, like Gecko) Chrome/32.0.1700.77 Safari/537.36"
+# }
+
 headers = {
     "Accept":"Accept: application/json, text/javascript, */*; q=0.01",
     "Accept-Encoding":"text/html",
@@ -51,8 +66,7 @@ headers = {
     "Content-Type":"application/x-www-form-urlencoded; charset=UTF-8",
     "Referer":"http://m.115.com/",
     "X-Requested-With": "XMLHttpRequest",
-    "User-Agent":"Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 "\
-        "(KHTML, like Gecko) Chrome/32.0.1700.77 Safari/537.36"
+    "User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_4) AppleWebKit/537.36 (KHTML, like Gecko) \ Chrome/49.0.2623.75 Safari/537.36 115Browser/5.0.0"
 }
 
 ss = requests.session()
@@ -98,10 +112,11 @@ class pan115(object):
             self.save_cookies()
             return True
         else:
+            # print j
             print s % (1, 91, '  -- check_login fail\n')
             return False
 
-    def login(self, account, password):
+    def login1(self, account, password):
         print s % (1, 97, '\n  -- login')
 
         def get_ssopw(ssoext):
@@ -140,6 +155,19 @@ class pan115(object):
         }
         url = 'http://passport.115.com'
         ss.post(url, params=params, data=data, headers=theaders)
+        self.save_cookies()
+
+    def login(self):
+        if not f115api.getInfos(ss):
+            print(u'获取信息失败')
+            return
+        f115api.getQrcode(ss) # 取二维码
+        f115api.waitLogin(ss) # 等待手机确认登录
+        f115api.login(ss) # 触发登陆
+        # print('开启心跳线程')
+        # threading.Thread(target=keepLogin) # 开启心跳，防止掉线
+        # getTasksign() # 获取操作task所需信息
+        # getUserinfo() # 获取登陆用户信息
         self.save_cookies()
 
     def save_cookies(self):
@@ -191,6 +219,7 @@ class pan115(object):
         dir_loop1 = [{'dir': j['path'][-1]['name'], 'cid': j['cid']}]
         dir_loop2 = []
         #base_dir = os.getcwd()
+
         while dir_loop1:
             for d in dir_loop1:
                 params['cid'] = d['cid']
@@ -230,21 +259,30 @@ class pan115(object):
                             t =  os.path.join(d['dir'], t).encode('utf8')
                             t =  os.path.join(os.getcwd(), t)
                             infos = {
-                                'file': t,
-                                'dir_': os.path.split(t)[0],
-                                'dlink': self.get_dlink(i['pc']),
-                                'name': i['n'].encode('utf8'),
+                                # 'file': t,
+                                # 'dir_': os.path.split(t)[0],
+                                # 'dlink': self.get_dlink(i['pc']),
+                                # 'name': i['n'].encode('utf8'),
+                                'name': i['n'].encode('utf-8'),
+                                'code': 'pickcode='+i['pc']
                                 #'purl': self._get_play_purl(
                                 #   i['pc'].encode('utf8')) \
                                 #       if args.play and self.is_vip else None,
-                                'purl': self._get_play_purl(
-                                    i['pc'].encode('utf8')) \
-                                        if args.play else None,
-                                'nn': nn,
-                                'total_file': total_file
+                                # 'purl': self._get_play_purl(
+                                #     i['pc'].encode('utf8')) \
+                                #         if args.play else None,
+                                # 'nn': nn,
+                                # 'total_file': total_file
                             }
                             nn += 1
                             self.download(infos)
+                            # if infos['name'].endswith('mp4') or infos['name'].endswith('rmvb') or infos['name'].endswith('mkv') or infos['name'].endswith('mpg') or infos['name'].endswith('wmv'):
+                            #     print i['n'], 'pickcode='+i['pc']
+                            #     # print type(i['n'])
+                            #     # print infos
+                            #     with open('info1.txt', 'a') as f:
+                            #         # f.write(str(infos))
+                            #         f.write('name: ' + str(i['n'].encode('utf-8'))+ ', code: pickcode=' + i['pc'] + '\n')
                 else:
                     print s % (1, 91, '  error: get_infos')
                     sys.exit(0)
@@ -437,21 +475,22 @@ def main(argv):
     xxx = args.xxx
 
     if xxx[0] == 'login' or xxx[0] == 'g':
-        if len(xxx[1:]) < 1:
-            account = raw_input(s % (1, 97, ' account: '))
-            password = getpass(s % (1, 97, 'password: '))
-        elif len(xxx[1:]) == 1:
-            account = xxx[1]
-            password = getpass(s % (1, 97, '  password: '))
-        elif len(xxx[1:]) == 2:
-            account = xxx[1]
-            password = xxx[2]
-        else:
-            print s % (1, 91, '  login\n  login account\n  \
-                                 login account password')
+        # if len(xxx[1:]) < 1:
+        #     account = raw_input(s % (1, 97, ' account: '))
+        #     password = getpass(s % (1, 97, 'password: '))
+        # elif len(xxx[1:]) == 1:
+        #     account = xxx[1]
+        #     password = getpass(s % (1, 97, '  password: '))
+        # elif len(xxx[1:]) == 2:
+        #     account = xxx[1]
+        #     password = xxx[2]
+        # else:
+        #     print s % (1, 91, '  login\n  login account\n  \
+        #                          login account password')
 
         x = pan115()
-        x.login(account, password)
+        # x.login(account, password)
+        x.login()
         is_signin = x.check_login()
         if is_signin:
             print s % (1, 92, '  ++ login succeeds.')
@@ -485,3 +524,4 @@ def main(argv):
 if __name__ == '__main__':
     argv = sys.argv
     main(argv)
+
